@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Display link bandwidth and monitor geometry calculator: pixel clock, HDMI / DisplayPort fit, DSC, PPI, pixels per degree.">
+<title>display-bw</title>
+<link data-trunk rel="rust" href="crates/bw_web/Cargo.toml" data-type="main" data-wasm-opt="z" data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-reference-types --enable-multivalue">
+<link data-trunk rel="css" href="web/style.css">
+<link data-trunk rel="copy-file" href="web/boot.js">
+<link data-trunk rel="copy-file" href="web/favicon.svg">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<header>
+  <div>
+    <h1 data-i18n="title">Display link bandwidth &amp; monitor calculator</h1>
+    <p class="sub" data-i18n="subtitle"></p>
+  </div>
+  <button id="lang" type="button" class="ghost">한국어</button>
+</header>
+
+<noscript><p class="warn">This calculator needs JavaScript and WebAssembly. 이 계산기는 JavaScript와 WebAssembly가 필요합니다.</p></noscript>
+
+<main>
+<section class="card" aria-labelledby="h-mode">
+  <h2 id="h-mode" data-i18n="sec_mode">Mode</h2>
+  <div class="grid">
+    <label><span data-i18n="resolution">Resolution</span>
+      <select id="res-preset">
+        <option value="1920x1080">1920 × 1080</option>
+        <option value="2560x1440">2560 × 1440</option>
+        <option value="3440x1440">3440 × 1440</option>
+        <option value="3840x2160">3840 × 2160</option>
+        <option value="5120x1440">5120 × 1440</option>
+        <option value="5120x2160">5120 × 2160</option>
+        <option value="7680x2160">7680 × 2160</option>
+        <option value="7680x4320">7680 × 4320</option>
+        <option value="custom" data-i18n="custom">Custom</option>
+      </select>
+    </label>
+    <div class="pair">
+      <label>H <input id="h" type="number" min="1" max="32768" step="1" inputmode="numeric"></label>
+      <span class="x">×</span>
+      <label>V <input id="v" type="number" min="1" max="32768" step="1" inputmode="numeric"></label>
+    </div>
+    <label><span data-i18n="refresh">Refresh rate (Hz)</span>
+      <span class="combo">
+        <select id="hz-preset">
+          <option>60</option><option>120</option><option>144</option><option>165</option>
+          <option>240</option><option>360</option><option>480</option>
+          <option value="custom" data-i18n="custom">Custom</option>
+        </select>
+        <input id="hz" type="number" min="1" max="1000" step="any" inputmode="decimal">
+      </span>
+    </label>
+    <label><span data-i18n="depth">Bit depth / channel</span>
+      <select id="depth"><option>6</option><option>8</option><option>10</option><option>12</option></select>
+    </label>
+    <label><span data-i18n="chroma">Chroma</span>
+      <select id="chroma">
+        <option value="444">RGB / 4:4:4</option>
+        <option value="422">YCbCr 4:2:2</option>
+        <option value="420">YCbCr 4:2:0</option>
+      </select>
+    </label>
+    <label><span data-i18n="timing">Timing standard</span>
+      <select id="timing">
+        <option value="r2" data-i18n="timing_r2">CVT-R2</option>
+        <option value="rb" data-i18n="timing_rb">CVT-RB</option>
+        <option value="cvt" data-i18n="timing_cvt">CVT</option>
+        <option value="custom" data-i18n="timing_custom">Custom totals</option>
+      </select>
+    </label>
+    <div class="pair" id="custom-totals">
+      <label><span data-i18n="h_total">H total</span> <input id="ht" type="number" min="1" max="65535" step="1" inputmode="numeric"></label>
+      <label><span data-i18n="v_total">V total</span> <input id="vt" type="number" min="1" max="65535" step="1" inputmode="numeric"></label>
+    </div>
+    <label><span data-i18n="dsc_bpp">DSC target (bpp)</span>
+      <input id="dsc" type="number" min="6" max="36" step="0.0625" inputmode="decimal">
+    </label>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="h-res">
+  <h2 id="h-res" data-i18n="sec_results">Results</h2>
+  <p class="err" id="mode-err" hidden></p>
+  <dl class="kv" id="out-timing"></dl>
+  <div class="table-wrap"><table id="out-links"></table></div>
+  <p class="approx" data-i18n="approx"></p>
+  <details>
+    <summary data-i18n="notes_title">Assumptions &amp; simplifications</summary>
+    <div id="notes" class="notes"></div>
+  </details>
+</section>
+
+<section class="card" aria-labelledby="h-max">
+  <h2 id="h-max" data-i18n="sec_max">Max refresh finder</h2>
+  <div class="grid">
+    <label><span data-i18n="max_link">Link</span> <select id="link"></select></label>
+  </div>
+  <dl class="kv" id="out-max"></dl>
+</section>
+
+<section class="card" aria-labelledby="h-geo">
+  <h2 id="h-geo" data-i18n="sec_geo">Geometry</h2>
+  <div class="cols">
+    <div>
+      <h3 data-i18n="monitor_a">Monitor A</h3>
+      <div class="grid">
+        <label><span data-i18n="diagonal">Diagonal (in)</span> <input id="diag" type="number" min="1" max="1000" step="0.1" inputmode="decimal"></label>
+        <label><span data-i18n="distance">Viewing distance (cm)</span> <input id="dist" type="number" min="1" max="10000" step="1" inputmode="decimal"></label>
+        <label><span data-i18n="curve">Curvature radius</span> <input id="curve" type="number" min="0" max="100000" step="100" inputmode="decimal"></label>
+      </div>
+      <dl class="kv" id="out-geo-a"></dl>
+    </div>
+    <div>
+      <h3 data-i18n="monitor_b">Monitor B</h3>
+      <div class="grid">
+        <label><span data-i18n="resolution">Resolution</span>
+          <select id="b-preset">
+            <option value="1920x1080">1920 × 1080</option>
+            <option value="2560x1440">2560 × 1440</option>
+            <option value="3440x1440">3440 × 1440</option>
+            <option value="3840x2160">3840 × 2160</option>
+            <option value="5120x1440">5120 × 1440</option>
+            <option value="5120x2160">5120 × 2160</option>
+            <option value="7680x2160">7680 × 2160</option>
+            <option value="7680x4320">7680 × 4320</option>
+            <option value="custom" data-i18n="custom">Custom</option>
+          </select>
+        </label>
+        <div class="pair">
+          <label>H <input id="b-h" type="number" min="1" max="32768" step="1" inputmode="numeric"></label>
+          <span class="x">×</span>
+          <label>V <input id="b-v" type="number" min="1" max="32768" step="1" inputmode="numeric"></label>
+        </div>
+        <label><span data-i18n="diagonal">Diagonal (in)</span> <input id="b-diag" type="number" min="1" max="1000" step="0.1" inputmode="decimal"></label>
+      </div>
+      <dl class="kv" id="out-geo-b"></dl>
+    </div>
+  </div>
+  <h3 data-i18n="compare">Size comparison</h3>
+  <canvas id="cmp" height="260" aria-label="size comparison"></canvas>
+</section>
+
+<section class="card" aria-labelledby="h-sum">
+  <h2 id="h-sum" data-i18n="summary">Plain-text summary</h2>
+  <div class="actions">
+    <button id="copy" type="button" data-i18n="copy">Copy summary</button>
+    <button id="share" type="button" class="ghost" data-i18n="share">Copy share link</button>
+    <span id="copy-status" role="status"></span>
+  </div>
+  <textarea id="out-text" readonly rows="12" spellcheck="false"></textarea>
+</section>
+</main>
+
+<footer>
+  <p data-i18n="privacy"></p>
+  <p>display-bw · MIT</p>
+</footer>
+</body>
+</html>
